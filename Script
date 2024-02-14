@@ -1,0 +1,180 @@
+function checkValueInOtherSheets() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();  // 현재 문서
+  var currentSheet = spreadsheet.getActiveSheet();  // 현재 실행 시트
+  // var currentSheet = spreadsheet.getSheetByName('이슈리스트'); // 선택하려는 시트의 이름을 사용하여 시트 가져오기
+  // spreadsheet.setActiveSheet(currentSheet); // 특정 시트 활성화
+  var lastRow = countNonEmptyRowsFromSpecificRowInColumn(currentSheet, 'A', 1)  // 현재 문서의 빈값이 아닌 마지막 행 (A셀기준)
+
+  var range = currentSheet.getRange('A1:A' + lastRow);  // 현재 선택한 시트의 A열 범위
+  var valuesInColumnA = range.getValues();    // range 범위의 값을 배열에 저장
+  var addedString = "https://jira.nmn.io/browse/";
+  // valuesInColumnA 배열의 각 값에 추가 문자열을 붙여서 새로운 배열을 생성
+  var modifiedValues = valuesInColumnA.map(function(row) {
+    return row.map(function(cell) {
+      return addedString + cell;});});
+      // modifiedValues 배열을 콘솔에 출력 또는 다른 용도로 사용할 수 있습니다.
+      // console.log(modifiedValues);
+
+  var allSheets = spreadsheet.getSheets();    // 전체 시트
+  sheetnames = getAllSheetNames();    // 전체 시트 이름 저장
+  var numRow = 17;  // 17행부터 검색
+
+  var excludedTexts = [""]; // 제외할 시트 이름에 포함된 텍스트를 배열로 지정하세요.
+
+
+  // 문서 내 첫번째 시트부터 검색
+  for (var s = 0; s < allSheets.length; s++) {
+    var sheet = allSheets[s];
+    var sheetName = sheet.getName();
+    var isExcluded = false;
+    var tcColumn = null;
+    var btsColumn = null;
+    var resultColumn = null;
+
+
+
+    // 제외할 시트 이름에 포함되어 있을 경우 검색하지 않음
+    for (var j = 0; j < excludedTexts.length; j++) {
+    // 제외할 시트에 포함된 시트 이름인지 검색
+    if (sheetName.indexOf(excludedTexts[j]) !== -1) {
+      isExcluded = true;
+      break;
+      }
+    }
+    // 제외할 시트인 경우 다음 시트 검색으로 넘어감
+    if (isExcluded == true){
+      // 제외한 시트 이름 출력
+      // Logger.log(sheetName);
+      continue;
+      }
+    // 현재 선택한 시트는 검색에서 제외
+    if (sheetName !== currentSheet.getName()) {
+      // TC/CL열 위치(알파벳) 확인
+      var values = sheet.getRange(numRow-1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      for (var i = 0; i < values.length; i++) {
+        if (values[i] === '체크 항목') {
+          tcColumn = numberToAlpha(i + 1); // 열 번호는 1부터 시작하므로 +1을 해줍니다.
+          // Logger.log('TC열: ' + tcColumn);
+          break;
+        }
+      }
+      if(tcColumn == null)
+        continue;
+
+      // BTS열 위치(알파벳) 확인
+      for (var i = 0; i < values.length; i++) {
+        if (values[i] === 'BTS') {
+          btsColumn = numberToAlpha(i + 1); // 열 번호는 1부터 시작하므로 +1을 해줍니다.
+          // Logger.log('BTS열: ' + btsColumn);
+          break;
+        }
+      }
+      if (btsColumn == null)
+        continue;
+
+      // Result열 위치(알파벳) 확인
+      for (var i = 0; i < values.length; i++) {
+        if (values[i] === 'Result') {
+          resultColumn = numberToAlpha(i + 1); // 열 번호는 1부터 시작하므로 +1을 해줍니다.
+          // Logger.log('Result열: ' + resultColumn);
+          break;
+        }
+      }
+      if (resultColumn == null)
+        continue;
+
+      // TC가 비어있지 않은 마지막 행까지의 개수
+      var valueLastRow = countNonEmptyRowsFromSpecificRowInColumn(sheet, tcColumn, numRow) + numRow;
+
+      // TC 첫 행부터 비어있을 경우 에러 처리
+      if(valueLastRow < numRow)
+        continue;
+
+      var sheetRange = sheet.getRange(btsColumn + numRow + ':' + btsColumn + valueLastRow);  // BTS열 범위 지정
+      var sheetValuesInColumnBTS = sheetRange.getValues();    // BTS열의 값을 배열에 저장
+
+      for (var j = 0; j < sheetValuesInColumnBTS.length; j++) {
+        var cellValue = sheetValuesInColumnBTS[j][0];
+        // BTS열 셀의 값이 공백이 아닐경우
+        if (cellValue !== '') {
+          // 셀 값 분리
+          var lines = cellValue.split('\n'); // cellValue를 개행 문자를 기준으로 분할하여 lines 배열에 저장
+
+          // modifiedValues 배열에 존재하는지 확인
+          var existsInColumnA = lines.every(function(line) {
+              return modifiedValues.flat().some(function(value) {
+                return value.trim() === line.trim();
+          });
+        });
+
+        // BTS열 값이 이슈리스트에서 검색되었을 경우
+        if(existsInColumnA == true){
+          var resultValue = sheet.getRange(resultColumn + (j + numRow)).getValue();  // Result 열 값 확인
+          // 결과값이 N/A, No Run, Block인 TC일 경우의 처리
+          if (['N/A', 'No Run', 'Block'].includes(resultValue)){
+            // Logger.log(sheetName + ' 시트의 ' + resultColumn + (j + numRow) + ' 셀 값이 ' + resultValue);
+          }
+          else{
+              // Logger.log("'" + cellValue + "' 값은 " + sheetName + " 시트의 " + btsColumn + (j + numRow) + " 셀에서 발견되었습니다.");
+              // 발견된 경우 여기에 필요한 작업을 수행할 수 있습니다.
+              // 'Result'열 값을 "pass"로 변경
+              sheet.getRange(resultColumn + (j + numRow)).setValue('Pass');
+              Logger.log("'" + sheetName + "' 시트의 " + resultColumn + (j + numRow) + " 셀 값을 Pass로 수정했습니다.");
+              }
+          }
+          // 발견되지 않은 경우 여기에 필요한 작업을 수행할 수 있습니다.
+          else{
+            // Logger.log(lines + " 미발견");
+          }
+        }
+      }
+    }
+  }
+}
+
+
+
+// 문서 내 모든 시트 이름을 가져옴
+function getAllSheetNames() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var allSheets = spreadsheet.getSheets();
+  var sheetNames = [];
+
+  for (var i = 0; i < allSheets.length; i++) {
+    sheetNames.push(allSheets[i].getName());
+  }
+  // Logger.log(sheetNames); // 전체 시트 이름 배열 출력
+  // 필요에 따라 시트 이름 배열을 반환하거나 다른 작업에 활용할 수 있습니다.
+  return sheetNames;
+}
+
+// 비어있지 않은 마지막 행까지의 개수 구하기
+function countNonEmptyRowsFromSpecificRowInColumn(sheet, column, startRow) {
+  var lastRow = sheet.getLastRow();
+  var range = sheet.getRange(startRow, getColumnNumber(column), lastRow - startRow + 1, 1); // 범위 설정
+  var values = range.getValues();
+  var nonEmptyRowCount = 0;
+
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] !== "") {
+      nonEmptyRowCount++;
+    }
+  }
+  return nonEmptyRowCount;
+}
+
+// 열번호 리턴 (알파벳 -> 숫자)
+function getColumnNumber(column) {
+  return column.toUpperCase().charCodeAt(0) - 64;
+}
+
+// 열번호 리턴 (숫자 -> 알파벳)
+function numberToAlpha(num) {
+  var alpha = '';
+  while (num > 0) {
+    var remainder = (num - 1) % 26;
+    alpha = String.fromCharCode(65 + remainder) + alpha;
+    num = Math.floor((num - 1) / 26);
+  }
+  return alpha;
+}
